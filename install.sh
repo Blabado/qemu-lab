@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-#set -x 
 check_programs() {
     echo "Checking required programs..."
-    local programs=("qemu-aarch64" "virsh" "mkisofs" "virt-install")
+    local programs=("qemu-nbd" "virsh" "mkisofs" "virt-install")
     local missing=()
 
     for program in "${programs[@]}"; do
@@ -29,12 +28,48 @@ generate_ssh_key() {
 }
 
 export_default_net() {
+    echo "Root access is required for these commands."
+    echo "sudo virsh net-define default.xml"
+    echo "sudo virsh net-autostart default"
+    echo "sudo virsh net-start default"
+    
     sudo virsh net-define default.xml
     sudo virsh net-autostart default
     sudo virsh net-start default
 
+
 }
 
+parse_inventory() {
+    name=""
+    ram=""
+    vcpus=""
+    storage=""
+
+while read -r line; do
+    # Удаляем пробелы по краям и пропускаем пустые строки
+    line=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    [[ -z "$line" ]] && continue
+
+    # Извлекаем ключ и значение
+    key=$(echo "$line" | cut -d':' -f1 | tr -d ' ')
+    value=$(echo "$line" | cut -d':' -f2 | tr -d ' ')
+
+    case "$key" in
+        name) name="$value" ;;
+        ram) ram="$value" ;;
+        vcpus) vcpus="$value" ;;
+        storage)
+            storage="$value"
+            # После storage считаем, что запись завершена — можно вывести или сохранить
+            ./create-infra-base.sh $name $ram $vcpus $storage
+            ;;
+    esac
+done < ./inventory.txt
+
+}
+
+#---------------------GENERAL--------------------------
 check_programs
 
 echo "Do you want to configure an ssh key? [n/Y]"
@@ -45,9 +80,11 @@ if [[ "$answer" == "y" ]]; then
     generate_ssh_key
 fi
 
-export_default_net
-./create-infra-base.sh
-#./create-infra-base.sh test1
+#export_default_net
+parse_inventory
+
+
+#./create-infra-base.sh infra-docer
 #./create-vm-from-template.sh infra-docker
 #./create-vm-from-template.sh infra-monitor
 #./create-vm-from-template.sh infra-ci

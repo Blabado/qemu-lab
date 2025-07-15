@@ -1,0 +1,22 @@
+name: infra-docker
+    ram: 2048
+    vcpus: 2
+    storage: 10G
+name: infra-monitor
+    ram: 2048
+    vcpus: 2
+    storage: 10G
+name: infra-ci
+    ram: 2048
+    vcpus: 2
+    storage: 10G
+name: infra-storage
+    ram: 2048
+    vcpus: 2
+    storage: 10G
+name: infra-gw
+    ram: 2048
+    vcpus: 2
+    storage: 10G
+
+
