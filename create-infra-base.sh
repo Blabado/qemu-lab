@@ -1,24 +1,34 @@
+#set -x
+#-------------NAMES---------------------
 ADMINNAME="sys_admin"
-VM_NAME="infra-base"
+BASE_NAME="infra_docker"
+VM_NAME="${1:-$BASE_NAME}"
+#-------------DIR-----------------------
 BASE_DIR="$HOME/qemu-lab"
 IMAGE_DIR="$BASE_DIR/cloud-images"
 DISK_DIR="$BASE_DIR/pool"
 CI_DIR="$BASE_DIR/cloud-init/$VM_NAME"
+#--------------IMG----------------------
 SEED_ISO="$CI_DIR/seed-$VM_NAME.iso"
-DISK="$DISK_DIR/$VM_NAME.qcow2"
 CLOUD_IMG="$IMAGE_DIR/jammy-server-cloudimg-amd64.img"
-SSH_KEY_PATH="$HOME/.ssh/id_ed25519.pub"
-SSH_KEY=$(cat "$SSH_KEY_PATH")
+#-------------DISK----------------------
+DISK="$DISK_DIR/${VM_NAME}.qcow2"
+BASE_DISK="$DISK_DIR/${BASE_NAME}.qcow2"
+#------------ SSH-----------------------
+SSH_KEY_PATH_PUB="ssh_cloud/id_ed25519.pub"
+SSH_KEY_PATH_PRIV="ssh_cloud/id_ed25519"
+SSH_KEY=$(cat "$SSH_KEY_PATH_PUB")
 
-echo "[1/6] Создание директорий..."
+#----------------General----------------
+echo "[1/6] Create directory..."
 mkdir -p "$IMAGE_DIR" "$DISK_DIR" "$CI_DIR"
 
-echo "[2/6] Скачивание cloud-image (если нет)..."
+echo "[2/6] Download cloud-image (if none)..."
 if [ ! -f "$CLOUD_IMG" ]; then
     wget -O "$CLOUD_IMG" https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
 fi
 
-echo "[3/6] Подготовка cloud-init файлов..."
+echo "[3/6] Preparing cloud-init..."
 cat > "$CI_DIR/user-data" <<EOF
 #cloud-config
 hostname: $VM_NAME
@@ -32,6 +42,11 @@ users:
 disable_root: true
 package_update: true
 package_upgrade: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - [ systemctl, enable, qemu-guest-agent ]
+  - [ systemctl, start, qemu-guest-agent ]
 EOF
 
 cat > "$CI_DIR/meta-data" <<EOF
@@ -43,19 +58,25 @@ echo "[4/6] Генерация seed ISO..."
 mkisofs -output "$SEED_ISO" -volid cidata -joliet -rock \
     "$CI_DIR/user-data" "$CI_DIR/meta-data"
 
-echo "[5/6] Создание QCOW2-диска на базе cloud image..."
-qemu-img create -f qcow2 -F qcow2 -b "$CLOUD_IMG" "$DISK" 10G
+
+if [ "$VM_NAME" = "infra_docker" ]; then
+    echo "[5/6] Создание QCOW2-диска на базе cloud image..."
+    qemu-img create -f qcow2 -F qcow2 -b "$CLOUD_IMG" "$DISK" 10G
+else
+    echo "[5/6] Клонирование диска..."
+    cp "$BASE_DISK" "$DISK"  
+fi
 
 echo "[6/6] Запуск virt-install..."
 virt-install \
-  --connect qemu:///system \
+  --connect qemu:///session \
   --name "$VM_NAME" \
   --ram 2048 \
   --vcpus 2 \
   --os-variant ubuntu22.04 \
   --disk path="$DISK",format=qcow2 \
   --disk path="$SEED_ISO",device=cdrom \
-  --network network=default \
+  --network bridge=virbr0 \
   --import \
   --noautoconsole
 
@@ -67,7 +88,7 @@ sleep 4  # даём немного времени на init infra-base
 
 echo "[INFO] Получение IP-адреса VM '$VM_NAME'..."
 for i in {1..15}; do
-  VM_IP=$(virsh domifaddr "$VM_NAME" | awk '/ipv4/ {print $4}' | cut -d'/' -f1)
+  VM_IP=$(virsh domifaddr --source arp "$VM_NAME" | awk '/ipv4/ {print $4}' | cut -d'/' -f1)
   if [ -n "$VM_IP" ]; then
     echo "[INFO] IP: $VM_IP"
     break
@@ -84,7 +105,6 @@ fi
 echo "[INFO] Ожидаем доступности SSH от $ADMINNAME@$VM_IP..."
 
 MAX_ATTEMPTS=30
-SSH_KEY_PATH_PRIV="$HOME/.ssh/id_ed25519"  # или укажи явно путь
 SSH_CMD="ssh -i $SSH_KEY_PATH_PRIV -o StrictHostKeyChecking=no -o ConnectTimeout=3"
 
 for ((i=1; i<=MAX_ATTEMPTS; i++)); do
