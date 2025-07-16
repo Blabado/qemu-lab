@@ -40,7 +40,7 @@ export_default_net() {
 
 }
 
-parse_inventory() {
+parse_inventory_create_vm() {
     name=""
     ram=""
     vcpus=""
@@ -68,8 +68,34 @@ while read -r line; do
 done < ./inventory.txt
 
 }
+test_1() {
+    echo "$1"
+}
+check_available_cloud-init() {
+
+echo "[INFO] Waiting for cloud-init to finish..."
+
+local VM_IP="$1"
+local ADMINNAME="sys_admin"
+local SSH_KEY_PATH_PRIV="ssh_cloud/id_ed25519"
+local SSH_OPTS="-n -i $SSH_KEY_PATH_PRIV -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=3"
+
+for i in {1..20}; do
+  CLOUD_INIT_STATUS=$(ssh $SSH_OPTS "$ADMINNAME@$VM_IP" "cloud-init status --wait" 2>/dev/null || true)
+  if [[ "$CLOUD_INIT_STATUS" == *"done"* ]]; then
+    echo "[INFO] Cloud-init has completed successfully $VM_IP."
+    break
+  fi
+  echo "[INFO] Cloud-init not finished yet... $VM_IP"
+  sleep 5
+done
+
+}
 
 #---------------------GENERAL--------------------------
+rm .ip_for_ansible.txt
+rm result.txt
+
 check_programs
 
 echo "Do you want to configure an ssh key? [n/Y]"
@@ -80,13 +106,23 @@ if [[ "$answer" == "y" ]]; then
     generate_ssh_key
 fi
 
-#export_default_net
-parse_inventory
+echo "Set the default network environment?"
+echo "It is important that the bridge is on the virbr0 network interface."
+echo "Also check that the 'allow virbr0' line was in '/etc/qemu/bridge.conf'"
+echo "Please [n/Y]"
+read answer
+answer=${answer:-y}
 
+if [[ "$answer" == "y" ]]; then
+    export_default_net
+fi
 
-#./create-infra-base.sh infra-docer
-#./create-vm-from-template.sh infra-docker
-#./create-vm-from-template.sh infra-monitor
-#./create-vm-from-template.sh infra-ci
-#./create-vm-from-template.sh infra-storage
-#./create-vm-from-template.sh infra-gw
+parse_inventory_create_vm
+
+while read -r ip; do
+    check_available_cloud-init "$ip"
+done < .ip_for_ansible.txt
+
+echo "It's result.txt"
+cat result.txt
+echo "Virtual machines are ready"
