@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-echo "FUUUUUUUCKKKKK"
 #-------------NAMES---------------------
 ADMINNAME="sys_admin"
 VM_NAME="$1"
